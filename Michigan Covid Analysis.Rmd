@@ -1,0 +1,193 @@
+---
+title: "Michigan Covid Analysis"
+author: "Tyler Zender"
+date: "6/16/2021"
+output: html_document
+---
+
+## Introduction and Background
+
+Throughout the global COVID-19 pandemic, many eyes had been on the growth trends and occurrences
+of cases in areas of different backgrounds and demographics. I personally had been interested in the 
+spread and growth of the virus since its initial discovery in early 2020, but became much more invested
+in tracking its growth when it arrived in the USA as well as my home state of Michigan. 
+As the pandemic progressed, more and more data had been amassed by the state government
+which detailed the nature of this growth and the details surrounding each case. 
+Particularly notable is the fact that this collection of data had been noted with the 
+county of residence for the infected individual. Because of this, we can effectively perform
+an analysis of the counties in which cases occur in and draw conclusions about the tendency of 
+the virus to propagate in each population. Inspecting the characteristics of each county and 
+comparing these characteristics to the number of total cases that had occurred in each county
+can give us insight on where COVID-19 spread most effectively.
+
+## Purposes and Limitations
+
+Using data from the "michigan.gov/coronavirus" website, as well as manually-collected information from "census.gov" for a handful of counties, an analysis of county characteristics can help indicate under what conditions the COVID-19 virus reproduces rapidly. Specific characteristics being investigated to derive a conclusion include population, percent of population over 65 years of age, housing units in the county, and per capita income. These characteristics may all be related to the cumulative cases in the county for computing a mathematical relation. It should be noted that the number of data points that represent individual counties are limited (n=19) due to the laborious process of manual collection. Because of this, these results should be taken with caution and would need to be investigated further.
+
+## Methods:
+
+Data is extracted from .csv and .xlsx files for COVID-19 cases and demographics for 19 counties in the state of Michigan. An initial plot is made of the seven-day rolling average of cases in Oakland county to get a background on the general trend of cases. Afterwards, a number of simple linear regression models are used to evaluate which criteria most affect the cases per capita. Plots are generated to visualize data and models. Finally, a multiple linear regression model is generated to improve upon the simple linear regression models.
+
+## Results:
+
+```{r, echo=FALSE, results='hide'}
+
+library("readxl")
+library(ggplot2)
+library(repr)
+library(ggthemes)
+library("rgl")
+library("car")
+library("scatterplot3d")
+
+covid = read_excel("Cases_and_Deaths_by_County_and_by_Date_of_Symptom_Onset_or_by_Date_of_Death2021-06-16_728055_7.xlsx")
+covid = covid[covid$CASE_STATUS == "Confirmed", ]    
+countyData = read.csv("CountyData.csv")
+
+splitData = split(covid, covid$COUNTY)
+
+oakland = subset(covid, COUNTY == "Oakland")
+
+rollingAvg =  rep(0,nrow(oakland))
+
+
+for (ctr in 1:nrow(oakland)) {
+  min = ctr-6
+  if (min<1)
+  {
+    min = 1
+  }
+    
+  sumCases = sum(oakland$Cases[min:ctr])
+  rollingAvg[ctr] = sumCases/7
+}
+
+oakland$Date = as.Date(oakland$Date, format = "%m/%d/%y")
+oakland$rollingAvg = rollingAvg
+
+scale_fill_stata(scheme = "s2color")
+scale_color_stata(scheme = "s2color")
+
+oaklandPlot = ggplot(oakland) +geom_line(aes(x = Date, y = rollingAvg))
+oaklandPlot + ggtitle("Seven-day rolling average of covid-19 cases (Oakland, MI)") +
+  theme(plot.title = element_text(hjust = 0.5)) + xlab("Date") + ylab("Cases") + scale_x_date(date_breaks = "2 months" , date_labels = "%b-%y") + theme_stata() + scale_color_stata()
+```
+
+Using our first predictor, the percent of the population over 65, we get our first linear model with a low p-value for the t-test, being .01. At an alpha = .05 level, we would reject the null hypothesis that the coefficient for the relationship between percent over 65 and cases per capita is 0. The same data and model was plotted with a .95  confidence interval.
+
+```{r}
+countysOfInterest = c("Oakland", "Muskegon", "Ottawa", "Bay", "Cheboygan", "Macomb", "Wayne", "Washtenaw", "Monroe", "Genesee", "Ingham", "Grand Traverse", "Marquette", "Houghton", "Mackinac", "Lapeer", "Saginaw", "Eaton", "Kent")
+```
+
+```{r, echo=FALSE}
+
+cumulativeCounty = rep(0,length(countysOfInterest))
+cumulativeDeathsCounty = rep(0,length(countysOfInterest))
+for (ctr in 1:length(countysOfInterest))
+{
+  idxVec = which(covid$COUNTY == countysOfInterest[ctr])
+  vals = covid[idxVec, ]
+  cumulativeCounty[ctr] = max(vals$Cases.Cumulative)
+  cumulativeDeathsCounty[ctr] = max(vals$Deaths.Cumulative)
+}
+countyData$cumulative = cumulativeCounty
+countyData$cumulative.deaths = cumulativeDeathsCounty
+countyData$Cases.Per.Capita = countyData$cumulative/countyData$Population
+countyData$Deaths.Per.Case = countyData$cumulative.deaths/countyData$cumulative
+
+oldModel = lm(data=countyData, countyData$Cases.Per.Capita~Over.65)
+summary(oldModel)
+
+```
+
+```{r, echo=FALSE, results='hide',  message=FALSE}
+oldPlot = ggplot(countyData, aes(Over.65, Cases.Per.Capita)) + geom_point()
+oldPlot = oldPlot + theme_stata() + scale_color_stata() + ggtitle("Covid cases per capita vs percentage over 65")
+oldPlot = oldPlot + xlab("Percentage of county population over 65") + ylab("Covid cases per capita")
+oldPlot + geom_smooth(method='lm')
+```
+
+In the graph visualization, we can see the clearly defined trend of cases per capita in relation to percent over 65. Though one may have suspected a strong linear relationship between these two variables, it may not have been clear that the trend would have been negative. With the value of the linear coefficient coming out to -0.0024, we see that as the population becomes dominated by the elderly the cases per capita tend to decrease. One may speculate that this may have resulted from caution taken by these older folks knowing they are at risk. Another cause may have been due to less social exposure due to a lack of employment due to large portions of the population having been retired, thus reducing cases.
+
+```{r, echo=FALSE, results='hide',  message=FALSE}
+oldPlotDeaths = ggplot(countyData, aes(Over.65, Deaths.Per.Case)) + geom_point()
+oldPlotDeaths = oldPlotDeaths + theme_stata() + scale_color_stata() + ggtitle("Covid deaths per case vs percentage over 65")
+oldPlotDeaths = oldPlotDeaths + xlab("Percentage of county population over 65") + ylab("Covid deaths per case")
+oldPlotDeaths + geom_smooth(method='lm')
+```
+
+To investigate further into the effect of an elderly-dominated population on COVID-19 outcomes, the probability of each case resulting in a death was plotted against the percent of the population over 65. Surprisingly, there does not appear to be a strong positive relationship between these two variables as one might expect.
+
+The next three sets of coefficients look at the relationship between cases per capita vs housing per capita, per capita income, and population, respectively. 
+
+```{r, echo=FALSE}
+
+countyData$Housing.Per.Capita = countyData$Housing.Units/countyData$Population
+housingModel = lm(data=countyData, Cases.Per.Capita~Housing.Per.Capita)
+summary(housingModel)
+
+incomeModel = lm(data=countyData, Cases.Per.Capita~Per.Capita.Income) 
+summary(incomeModel)
+
+populationModel = lm(data=countyData, Cases.Per.Capita~Population)
+summary(populationModel)
+```
+
+We find that two of these three models provide generally little useful information. Using population of the county and per capita income of the county as predictors gives an a strong hint that neither of these independent variables has an impact on our variable of interest.
+
+However, we do see that the only the model utilizing housing per capita as the predictor displays a low p-value for the t-test. The produced linear coefficient is -0.0788, indicating that as housing per capita increases, cases decrease. This is as one might expect, where it may be expected that as less and less individuals are in a common household, there is are less individuals at risk if one were to contract the disease. At an alpha level of .05, we would reject the null hypothesis that there is no linear relationship between housing per capita and cases per capita. Below is a plot which visualizes these findings.
+
+```{r, echo=FALSE, results='hide',  message=FALSE}
+housingPlot = ggplot(countyData, aes(Housing.Per.Capita, Cases.Per.Capita)) + geom_point()
+housingPlot = housingPlot + theme_stata() + scale_color_stata() + ggtitle("Covid cases per capita vs housing per capita")
+housingPlot = housingPlot + xlab("Housing per capita") + ylab("Covid cases per capita")
+housingPlot + geom_smooth(method='lm')
+
+housingRMSE =  sqrt(mean((countyData$Cases.Per.Capita - fitted(housingModel)) ^ 2))
+```
+
+After noticing how well the model fit the data at the far right end of the plot, I quickly calculated the RMSE for the trained data and ended up with a value of .0138. This is in comparison to the residual standard error displayed in the earlier model summary of 0.0146. Though it is difficult to comprehend the meaningfulness of these values in relative isolation and with little frame of reference, I would believe them to both demonstrate relative efficiency and wellness of fit on the regression model on the data.
+
+Finally, one last multiple regression model was made with the two best predictors found across the previous models - housing per capita, and percentage of the population over 65.
+
+```{r, echo=FALSE, results='hide', message=FALSE}
+
+combinedModel = lm(data=countyData, Cases.Per.Capita~Housing.Per.Capita+Over.65)
+summary(combinedModel)
+
+
+s3d = scatterplot3d(x = countyData$Housing.Per.Capita, y = countyData$Over.65, z = countyData$Cases.Per.Capita, pch = 20, mar = c(5, 3, 4, 3), angle = 55, box = FALSE, xlab = "Housing per capita", ylab = "Percent of population over 65", zlab = "Cases per capita", xlim = c(.3,1.3), lab.z = 3,
+main = "Cases per capita vs housing and elderly population")
+s3d$plane3d(combinedModel, lty = "dotted")
+orig = s3d$xyz.convert(countyData$Housing.Per.Capita, countyData$Over.65, countyData$Cases.Per.Capita)
+plane = s3d$xyz.convert(countyData$Housing.Per.Capita, countyData$Over.65, fitted(combinedModel))
+i.negpos = 1 + (resid(combinedModel) > 0)
+segments(orig$x, orig$y, plane$x, plane$y,
+col = c("blue", "red")[i.negpos])
+
+
+# scatter plot with regression plane
+#scatter3D(countyData$Housing.Per.Capita, countyData$Over.65, countyData$Cases.Per.Capita) #, #ticktype = "detailed",
+    #xlab = "wt", ylab = "disp", zlab = "mpg",  
+    #surf = list(fitt,  facets = NA, fit = fitpoints), main = "mtcars")
+#s3d = scatter3d(countyData$Housing.Per.Capita, countyData$Over.65, countyData$Cases.Per.Capita)
+#s3d$plane3d(combinedModel)
+#s3d <- scatterplot3d(x = countyData$Housing.Per.Capita, y = countyData$Over.65, z = countyData$Cases.Per.Capita, type = "h", color = "blue",
+#angle = 55, scale.y = 0.7, pch = 16, main = "Adding elements")
+#s3d$plane3d(combinedModel)
+
+
+
+
+
+```
+
+In this increased complexity model, we generate a much lower p-value for the relationship between the predictors and the variable of interest. However, even in this more expanded model, we are able to reject the null hypothesis that there is no linear relationship between housing per capita and cases per capita, but only at an alpha = .1 level.
+
+## Conclusion
+
+Throughout this analysis, an evaluation of COVID-19 cumulative cases per capita for a handful of counties was evaluated in conjunction with demographics of each county. Specific demographic characteristics included information on percent of the population over 65, houses per capita, income per capita, and overall population. In isolated models, it was demonstrated that there is strong evidence to suggest a linear relationship between percent of the population over 65 and cumulative covid cases per capita, as well as housing per capita and cumulative covid cases per capita. In a combined model, more evidence was found to suggest that there is a linear relationship between housing per capita and cumulative covid cases per capita.
+
+## Future Work
+
+Though this analysis provided significant insights on the nature of COVID-19 for counties in the state of Michigan, the extent of the analysis is limited. Future work could included more data points, such as using counties across the USA, which would allow increased examination of COVID cases in response to factors such as state-wide lockdowns or restrictions put in place to limit the spread of the disease. Future analysis might also include the investigation of additional demographic variables available from sites such as census.gov such as sex makeup which would allow us to investigate differences between COVID-19 growth for male vs female populations.
